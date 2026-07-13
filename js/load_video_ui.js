@@ -305,11 +305,16 @@ app.registerExtension({
                             const body = new FormData();
                             body.append("image", file);
                             body.append("subfolder", "whatdreamscost");
-
-                            const resp = await api.fetchApi("/upload/image", {
-                                method: "POST",
-                                body: body,
-                            });
+                            
+                            let resp;
+                            if (window.parent?.floyo) {
+                                resp = await window.parent.floyo.uploadImage(body);
+                            } else {
+                                resp = await api.fetchApi("/upload/image", {
+                                    method: "POST",
+                                    body: body
+                                });
+                            }
 
                             if (resp.status === 413) {
                                 throw new Error("File too large. Make sure python backend has the chunking update.");

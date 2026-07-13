@@ -3912,7 +3912,13 @@ class TimelineEditor {
           const body = new FormData();
           body.append("image", file);
           body.append("subfolder", "whatdreamscost");
-          const resp = await api.fetchApi("/upload/image", { method: "POST", body });
+
+          let resp;
+          if (window.parent?.floyo) {
+            resp = await window.parent.floyo.uploadImage(body);
+          } else {
+            resp = await api.fetchApi("/upload/image", { method: "POST", body });
+          }
           if (resp.status !== 200) { resolve(); return; }
 
           const data = await resp.json();
@@ -4057,7 +4063,12 @@ class TimelineEditor {
       const body = new FormData();
       body.append("image", file);
       body.append("subfolder", "whatdreamscost");
-      const resp = await api.fetchApi("/upload/image", { method: "POST", body });
+      let resp;
+      if (window.parent?.floyo) {
+        resp = await window.parent.floyo.uploadImage(body);
+      } else {
+        resp = await api.fetchApi("/upload/image", { method: "POST", body });
+      }
       if (resp.status !== 200) throw new Error(`LTX Director video upload failed: ${resp.statusText}`);
       const data = await resp.json();
       const subfolder = data.subfolder || "";
@@ -4587,8 +4598,13 @@ class TimelineEditor {
           const body = new FormData();
           body.append("image", file);
           body.append("subfolder", "whatdreamscost");
-          const resp = await api.fetchApi("/upload/image", { method: "POST", body });
-          if (resp.status !== 200) { resolve(); return; }
+          let resp;
+          if (window.parent?.floyo) {
+            resp = await window.parent.floyo.uploadImage(body);
+          } else {
+            resp = await api.fetchApi("/upload/image", { method: "POST", body });
+          }
+         if (resp.status !== 200) { resolve(); return; }
 
           const data = await resp.json();
           const filename = data.name;
@@ -9471,7 +9487,13 @@ class TimelineEditor {
               const body = new FormData();
               body.append("image", file);
               body.append("subfolder", "whatdreamscost");
-              const resp = await api.fetchApi("/upload/image", { method: "POST", body });
+
+              let resp;
+              if (window.parent?.floyo) {
+                resp = await window.parent.floyo.uploadImage(body);
+              } else {
+                resp = await api.fetchApi("/upload/image", { method: "POST", body });
+              }
               if (resp.status === 200) {
                 const data = await resp.json();
                 const filename = data.name;
@@ -9516,7 +9538,12 @@ class TimelineEditor {
             const body = new FormData();
             body.append("image", file);
             body.append("subfolder", "whatdreamscost");
-            const resp = await api.fetchApi("/upload/image", { method: "POST", body });
+            let resp;
+            if (window.parent?.floyo) {
+                resp = await window.parent.floyo.uploadImage(body);
+            } else {
+                resp = await api.fetchApi("/upload/image", { method: "POST", body });
+            }
             if (resp.status === 200) {
               const data = await resp.json();
               const filename = data.name;

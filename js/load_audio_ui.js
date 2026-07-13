@@ -93,10 +93,15 @@ app.registerExtension({
                         body.append("type", "input");
                         body.append("subfolder", "whatdreamscost");
                         
-                        const resp = await api.fetchApi("/upload/image", {
-                            method: "POST",
-                            body,
-                        });
+                        let resp;
+                        if (window.parent?.floyo) {
+                            resp = await window.parent.floyo.uploadImage(body);
+                        } else {
+                            resp = await api.fetchApi("/upload/image", {
+                                method: "POST",
+                                body,
+                            });
+                        }
 
                         if (resp.status === 200) {
                             const data = await resp.json();
