@@ -4049,6 +4049,8 @@ class TimelineEditor {
       console.warn("[LTXDirector] Failed to check for existing file, proceeding with upload", e);
     }
 
+    // @FLYO: no need to chunk files smaller than 50 MB, the Floyo uploader handles it automatically
+    /*
     if (file.size > CHUNK_SIZE) {
       // --- Chunked path ---
       const safeName = Date.now() + "_" + safeFileName;
@@ -4065,6 +4067,7 @@ class TimelineEditor {
       }
       return safeName; // filename (no subfolder) in the input dir
     } else {
+    */
       // --- Single-shot path (small file) ---
       const body = new FormData();
       body.append("image", file);
@@ -4079,7 +4082,7 @@ class TimelineEditor {
       const data = await resp.json();
       const subfolder = data.subfolder || "";
       return subfolder ? subfolder + "/" + data.name : data.name;
-    }
+    // }
   }
 
   async handleVideoUpload(files, targetFrameStart = null) {
