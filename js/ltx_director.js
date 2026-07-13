@@ -1929,7 +1929,10 @@ class TimelineEditor {
         audioBuffer = await this._audioBufferPromises.get(cacheKey);
       } else {
         const decodePromise = (async () => {
-          const resp = await fetch(audioUrl);
+          const resp = await fetch(audioUrl, {
+            mode: "cors",   
+            credentials: "include",
+          });
           const arrayBuffer = await resp.arrayBuffer();
           return await this.audioContext.decodeAudioData(arrayBuffer);
         })();
@@ -1996,7 +1999,10 @@ class TimelineEditor {
         audioBuffer = await this._audioBufferPromises.get(cacheKey);
       } else {
         const decodePromise = (async () => {
-          const resp = await fetch(audioUrl);
+          const resp = await fetch(audioUrl, {
+            mode: "cors",
+            credentials: "include",
+          });
           const arrayBuffer = await resp.arrayBuffer();
           return await this.audioContext.decodeAudioData(arrayBuffer);
         })();
@@ -3915,7 +3921,7 @@ class TimelineEditor {
 
           let resp;
           if (window.parent?.floyo) {
-            resp = await window.parent.floyo.uploadImage(body);
+            resp = await window.parent.floyo.uploadImage(body, false);
           } else {
             resp = await api.fetchApi("/upload/image", { method: "POST", body });
           }
@@ -10918,7 +10924,10 @@ class TimelineEditor {
                 audioBuffer = await this._audioBufferPromises.get(cacheKey);
               } else {
                 const decodePromise = (async () => {
-                  const resp = await fetch(audioUrl);
+                  const resp = await fetch(audioUrl, {
+                    mode: "cors",
+                    credentials: "include",
+                  });
                   const arrayBuffer = await resp.arrayBuffer();
                   return await this.audioContext.decodeAudioData(arrayBuffer);
                 })();
