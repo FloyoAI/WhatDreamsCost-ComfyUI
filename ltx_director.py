@@ -390,12 +390,47 @@ async def ltx_director_upload_chunk(request):
 
 
 
+def _resolve_media_path(rel_path: str):
+    """Resolve a timeline media path against Comfy input dirs, including Floyo #inputs layout."""
+    if not rel_path or not isinstance(rel_path, str):
+        return None
+
+    # Normalize mangled Floyo paths: whatdreamscost/#inputs/whatdreamscost/x -> #inputs/whatdreamscost/x
+    floyo_match = None
+    for marker in ("#inputs/", "#outputs/", "#temp/", "#models/", "#community_inputs/", "(as-input)#"):
+        idx = rel_path.find(marker)
+        if idx != -1:
+            floyo_match = rel_path[idx:]
+            break
+    if floyo_match:
+        rel_path = floyo_match
+
+    input_dir = folder_paths.get_input_directory()
+    basename = os.path.basename(rel_path.rstrip("/"))
+    candidates = [
+        os.path.join(input_dir, rel_path),
+        os.path.join(input_dir, "whatdreamscost", basename),
+        os.path.join(input_dir, "#inputs", "whatdreamscost", basename),
+        os.path.join(input_dir, "#inputs", basename),
+        os.path.join(input_dir, basename),
+    ]
+    # Also try comfy root #inputs symlink (input_dir/../#inputs/...)
+    comfy_root = os.path.dirname(input_dir)
+    if rel_path.startswith("#"):
+        candidates.insert(1, os.path.join(comfy_root, rel_path))
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
 def _load_image_tensor(seg: dict) -> torch.Tensor:
     """Decode an image from the ComfyUI input folder (if imageFile provided) or fallback to base64
     to a ComfyUI-style image tensor of shape [1, H, W, 3], float32 in [0, 1]."""
     if seg.get("imageFile"):
-        file_path = os.path.join(folder_paths.get_input_directory(), seg["imageFile"])
-        if os.path.exists(file_path):
+        file_path = _resolve_media_path(seg["imageFile"])
+        if file_path:
             img = Image.open(file_path).convert("RGB")
             arr = np.array(img, dtype=np.float32) / 255.0
             return torch.from_numpy(arr).unsqueeze(0)
@@ -418,9 +453,9 @@ def _load_image_tensor(seg: dict) -> torch.Tensor:
 def _load_video_tensor(seg: dict, frame_rate: float) -> torch.Tensor:
     """Extracts a sequence of frames from a video file based on the segment's trim parameters,
     and returns them as an [N, H, W, 3] float32 tensor."""
-    file_path = os.path.join(folder_paths.get_input_directory(), seg.get("imageFile", ""))
+    file_path = _resolve_media_path(seg.get("imageFile", ""))
     
-    if not os.path.exists(file_path):
+    if not file_path:
         return torch.zeros((1, 512, 512, 3), dtype=torch.float32)
 
     trim_start_frames = float(seg.get("trimStart", 0))
@@ -621,15 +656,8 @@ def _build_combined_audio(timeline_data_str: str, start_frame: int, duration_fra
         buffer = None
         file_key = "videoFile" if override_audio else "audioFile"
         if seg.get(file_key):
-            file_path = os.path.join(folder_paths.get_input_directory(), seg[file_key])
-            if not os.path.exists(file_path):
-                # Try fallback under whatdreamscost subfolder
-                basename = os.path.basename(seg[file_key])
-                fallback_path = os.path.join(folder_paths.get_input_directory(), "whatdreamscost", basename)
-                if os.path.exists(fallback_path):
-                    file_path = fallback_path
-
-            if os.path.exists(file_path):
+            file_path = _resolve_media_path(seg[file_key])
+            if file_path:
                 with open(file_path, "rb") as f:
                     buffer = _io.BytesIO(f.read())
         
@@ -887,6 +915,10 @@ class LTXDirector(io.ComfyNode):
                     "timeline_data", default="",
                     tooltip="JSON state of the timeline editor (auto-managed; do not edit by hand).",
                 ),
+                io.String.Input(
+                    "input_files", default="",
+                    tooltip="Newline-separated Floyo input paths referenced by the timeline (auto-managed for path extraction).",
+                ),
                 io.Boolean.Input(
                     "use_custom_audio", default=False, optional=True,
                     tooltip="Toggle between using timeline audio (ON) and generating audio from scratch (OFF).",
@@ -969,7 +1001,12 @@ class LTXDirector(io.ComfyNode):
                 frame_rate=24, display_mode="seconds",
                 custom_width=768, custom_height=512, resize_method="maintain aspect ratio",
                 divisible_by=32, img_compression=0, audio_vae=None, optional_latent=None,
-                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False) -> io.NodeOutput:
+                use_custom_audio=False, inpaint_audio=True, use_custom_motion=True, override_audio=False,
+                input_files="") -> io.NodeOutput:
+
+        # input_files is a Floyo path-extraction aid (newline-separated #inputs/... paths).
+        # Kept on the node so dispatchers can discover media without parsing timeline_data JSON.
+        _ = input_files
 
         # Parse timeline data
         try:
@@ -1076,13 +1113,8 @@ class LTXDirector(io.ComfyNode):
                 retake_vid = tdata_motion.get("retakeVideo") or {}
                 retake_file = retake_vid.get("imageFile", "") if isinstance(retake_vid, dict) else ""
                 if is_retake and retake_file:
-                    r_path = os.path.join(folder_paths.get_input_directory(), retake_file)
-                    if not os.path.exists(r_path):
-                        basename = os.path.basename(retake_file)
-                        fallback_path = os.path.join(folder_paths.get_input_directory(), "whatdreamscost", basename)
-                        if os.path.exists(fallback_path):
-                            r_path = fallback_path
-                    if os.path.exists(r_path):
+                    r_path = _resolve_media_path(retake_file)
+                    if r_path:
                         try:
                             with av.open(r_path) as container:
                                 stream = container.streams.video[0]
@@ -1097,13 +1129,8 @@ class LTXDirector(io.ComfyNode):
                     for mseg in tdata_motion.get("motionSegments", []):
                         v_file = mseg.get("videoFile")
                         if v_file:
-                            v_path = os.path.join(folder_paths.get_input_directory(), v_file)
-                            if not os.path.exists(v_path):
-                                basename = os.path.basename(v_file)
-                                fallback_path = os.path.join(folder_paths.get_input_directory(), "whatdreamscost", basename)
-                                if os.path.exists(fallback_path):
-                                    v_path = fallback_path
-                            if os.path.exists(v_path):
+                            v_path = _resolve_media_path(v_file)
+                            if v_path:
                                 try:
                                     with av.open(v_path) as container:
                                         stream = container.streams.video[0]

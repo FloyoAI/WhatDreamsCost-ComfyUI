@@ -11,7 +11,72 @@ const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
 const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
 
-const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "use_custom_motion", "override_audio"];
+const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio", "inpaint_audio", "use_custom_motion", "override_audio", "input_files"];
+
+/**
+ * Build a Floyo-compatible media path from a Comfy/Floyo /upload/image response.
+ * Floyo may return either:
+ *   - { name: "file.mp4", floyoFolder: "#inputs", subfolder: "whatdreamscost" }
+ *   - { name: "#inputs/whatdreamscost/file.mp4", floyoFolder: "#inputs", subfolder: "whatdreamscost" }
+ * Never prepend subfolder onto an already-qualified Floyo path.
+ */
+function mediaPathFromUpload(data) {
+  if (!data || typeof data.name !== "string" || !data.name) {
+    return { path: "", filename: "", viewSubfolder: "" };
+  }
+
+  let path;
+  if (data.name.startsWith("#") || data.name.startsWith("(as-input)")) {
+    path = data.name;
+  } else if (data.floyoFolder) {
+    const mid = data.subfolder ? `${data.subfolder}/` : "";
+    path = `${data.floyoFolder}/${mid}${data.name}`;
+  } else {
+    path = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+  }
+
+  // Normalize legacy mangled values: whatdreamscost/#inputs/whatdreamscost/x -> #inputs/whatdreamscost/x
+  const floyoMatch = path.match(/#(?:community_)?(?:inputs|outputs|temp|models)\/.+$|\(as-input\)#[^/]+\/.+$/);
+  if (floyoMatch) {
+    path = floyoMatch[0];
+  }
+
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  const filename = parts.pop() || data.name;
+  const viewSubfolder = parts
+    .filter((p) => !p.startsWith("#") && !p.startsWith("(as-input)"))
+    .join("/");
+
+  return { path, filename, viewSubfolder };
+}
+
+/** Collect unique server media paths for Floyo path extraction (newline-separated). */
+function collectInputFilesFromTimeline(timeline) {
+  const paths = new Set();
+  const add = (p) => {
+    if (typeof p !== "string" || !p) return;
+    if (p.startsWith("blob:") || p.startsWith("data:") || p.startsWith("/view?")) return;
+    const floyoMatch = p.match(/#(?:community_)?(?:inputs|outputs|temp|models)\/.+$|\(as-input\)#[^/]+\/.+$/);
+    paths.add(floyoMatch ? floyoMatch[0] : p);
+  };
+
+  for (const s of timeline?.segments || []) {
+    add(s.imageFile);
+    add(s.videoFile);
+  }
+  for (const s of timeline?.motionSegments || []) {
+    add(s.imageFile);
+    add(s.videoFile);
+  }
+  for (const s of timeline?.audioSegments || []) {
+    add(s.audioFile);
+    add(s.videoFile);
+  }
+  if (timeline?.retakeVideo) {
+    add(timeline.retakeVideo.imageFile);
+  }
+  return [...paths].join("\n");
+}
 
 function hideWidget(w) {
   if (!w) return;
@@ -824,6 +889,7 @@ class TimelineEditor {
     this.localPromptsWidget = this.node.widgets.find(w => w.name === "local_prompts");
     this.segmentLengthsWidget = this.node.widgets.find(w => w.name === "segment_lengths");
     this.guideStrengthWidget = this.node.widgets.find(w => w.name === "guide_strength");
+    this.inputFilesWidget = this.node.widgets.find(w => w.name === "input_files");
     this.displayModeWidget = this.node.widgets.find(w => w.name === "display_mode");
 
     // Track the last-known frame rate so we can compute the rescale ratio
@@ -3928,10 +3994,8 @@ class TimelineEditor {
           if (resp.status !== 200) { resolve(); return; }
 
           const data = await resp.json();
-          const filename = data.name;
-          const subfolder = data.subfolder || "";
-          const imageFile = subfolder ? subfolder + "/" + filename : filename;
-          const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+          const { path: imageFile, filename, viewSubfolder } = mediaPathFromUpload(data);
+          const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(viewSubfolder)}`);
 
           const img = new Image();
           img.onload = () => {
@@ -4080,8 +4144,7 @@ class TimelineEditor {
       }
       if (resp.status !== 200) throw new Error(`LTX Director video upload failed: ${resp.statusText}`);
       const data = await resp.json();
-      const subfolder = data.subfolder || "";
-      return subfolder ? subfolder + "/" + data.name : data.name;
+      return mediaPathFromUpload(data).path;
     // }
   }
 
@@ -4616,9 +4679,7 @@ class TimelineEditor {
          if (resp.status !== 200) { resolve(); return; }
 
           const data = await resp.json();
-          const filename = data.name;
-          const subfolder = data.subfolder || "";
-          const audioFile = subfolder ? subfolder + "/" + filename : filename;
+          const { path: audioFile } = mediaPathFromUpload(data);
 
           const arrayBuffer = await file.arrayBuffer();
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -8902,6 +8963,10 @@ class TimelineEditor {
       updateWidgetValue(this.timelineDataWidget, jsonStr);
     }
 
+    if (this.inputFilesWidget) {
+      updateWidgetValue(this.inputFilesWidget, collectInputFilesFromTimeline(toSave));
+    }
+
     if (this.node.properties) {
       this.node.properties.mainTrackEnabled = this.mainTrackEnabled;
       this.node.properties.audioTrackEnabled = this.audioTrackEnabled;
@@ -9505,10 +9570,8 @@ class TimelineEditor {
               }
               if (resp.status === 200) {
                 const data = await resp.json();
-                const filename = data.name;
-                const subfolder = data.subfolder || "";
-                const imageFile = subfolder ? subfolder + "/" + filename : filename;
-                const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+                const { path: imageFile, filename, viewSubfolder } = mediaPathFromUpload(data);
+                const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(viewSubfolder)}`);
 
                 const img = new Image();
                 img.onload = () => {
@@ -9555,10 +9618,8 @@ class TimelineEditor {
             }
             if (resp.status === 200) {
               const data = await resp.json();
-              const filename = data.name;
-              const subfolder = data.subfolder || "";
-              const imageFile = subfolder ? subfolder + "/" + filename : filename;
-              const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`);
+              const { path: imageFile, filename, viewSubfolder } = mediaPathFromUpload(data);
+              const imgUrl = api.apiURL(`/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(viewSubfolder)}`);
 
               const img = new Image();
               img.onload = () => {
