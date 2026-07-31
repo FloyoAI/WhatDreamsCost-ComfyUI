@@ -917,7 +917,7 @@ class LTXDirector(io.ComfyNode):
                 ),
                 io.String.Input(
                     "input_files", default="",
-                    tooltip="Newline-separated Floyo input paths referenced by the timeline (auto-managed for path extraction).",
+                    tooltip="Auto-managed Floyo path list (__FLOYO_INPUT_FILES__ + newline-separated #inputs/... paths). Used for storage resolution; do not edit.",
                 ),
                 io.Boolean.Input(
                     "use_custom_audio", default=False, optional=True,

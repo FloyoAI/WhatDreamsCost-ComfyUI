@@ -50,7 +50,9 @@ function mediaPathFromUpload(data) {
   return { path, filename, viewSubfolder };
 }
 
-/** Collect unique server media paths for Floyo path extraction (newline-separated). */
+const FLOYO_INPUT_FILES_MARKER = "__FLOYO_INPUT_FILES__";
+
+/** Collect unique server media paths for Floyo path extraction. */
 function collectInputFilesFromTimeline(timeline) {
   const paths = new Set();
   const add = (p) => {
@@ -75,7 +77,11 @@ function collectInputFilesFromTimeline(timeline) {
   if (timeline?.retakeVideo) {
     add(timeline.retakeVideo.imageFile);
   }
-  return [...paths].join("\n");
+
+  const list = [...paths];
+  if (list.length === 0) return "";
+  // Prefixed blob so Floyo dispatchers can split safely without touching other multiline widgets.
+  return [FLOYO_INPUT_FILES_MARKER, ...list].join("\n");
 }
 
 function hideWidget(w) {
